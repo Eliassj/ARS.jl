@@ -111,9 +111,19 @@ struct LowerHull{T} <: AbstractHull{T}
     end
 end
 
+function (hull::LowerHull)(x::Number)
+    v = let x = x
+        findfirst(i -> i >= x, intersections(hull))
+    end
+    if isnothing(v) || isone(v)
+        return -Inf
+    end
+    return hull.lines[v - 1](x)
+end
+
 "Slope of line between to points `(x1, ob.f(x1))` and `(x2, ob.f(x2))`"
 function slope(ob::Objective, x1::T, x2::T) where {T}
-    (x2 - x1) / (ob.f(x2) - ob.f(x1))
+    (ob.f(x2) - ob.f(x1)) / (x2 - x1)
 end
 
 @doc """
