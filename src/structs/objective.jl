@@ -9,23 +9,24 @@ Gradient function may be provided. If not it will be determined using automatic 
 
 $TYPEDFIELDS
 """
-struct Objective
+struct Objective{F, G} <: Function
     "Function to sample from"
-    f::Function
+    f::F
     "Derivative of `f`"
-    grad::Function
+    grad::G
 
     @doc """
      Construct an `Objective` with a function `f` and its gradient `grad`.
      """
-    function Objective(f::Function, grad::Function)
-        new(f, grad)
+    function Objective(f::F, grad::G) where {F <: Function, G <: Function}
+        new{F, G}(f, grad)
     end
 
     @doc """
      Construct an `Objective` with a function `f` and automatically determine its gradient.
      """
-    function Objective(f::Function)
-        new(f, x -> derivative(f, x))
+    function Objective(f::F) where {F <: Function}
+        gr = x -> derivative(f, x)
+        new{F, typeof(gr)}(f, gr)
     end
 end

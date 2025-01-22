@@ -1,31 +1,31 @@
 module MakieExt
 
-using MakieCore
-import MakieCore: Observable
+using Makie
+import Makie: Observable
 using ARS
 import ARS: samplerplot, samplerplot!
 
-function ARS.plotsampler(s::ARS.RejectionSampler, range::AbstractRange)
-    f = Figure()
-    ax = Axis(f[1, 1])
+# function ARS.plotsampler(s::ARS.RejectionSampler, range::AbstractRange)
+#     f = Figure()
+#     ax = Axis(f[1, 1])
 
-    lines!(ax, range, ARS.objective(s).(range))
-    lines!(ax, range, ARS.lowerhull.(range))
-    lines!(ax, range, ARS.upperhull.(range))
-    return f
-end
+#     lines!(ax, range, ARS.objective(s).(range))
+#     lines!(ax, range, ARS.eval_hull.(ARS.lowerhull, range))
+#     lines!(ax, range, ARS.upperhull, range))
+#     return f
+# end
 
-MakieCore.@recipe(SamplerPlot, r) do scene
-    MakieCore.Attributes(
+@recipe(SamplerPlot, r) do scene
+    Attributes(
         objectivecolor = :blue,
         lowerhullcolor = :green,
         upperhullcolor = :red
     )
 end
 
-const Point2f64 = MakieCore.Point{2, Float64}
+const Point2f64 = Makie.Point{2, Float64}
 
-function MakieCore.plot!(samplerplt::SamplerPlot{<:Tuple{
+function Makie.plot!(samplerplt::SamplerPlot{<:Tuple{
         <:ARS.RejectionSampler, <:AbstractRange}})
     sam = samplerplt[1]
     rang = samplerplt[2]
@@ -37,8 +37,8 @@ function MakieCore.plot!(samplerplt::SamplerPlot{<:Tuple{
     obj = Observable(Float64[])
 
     function update_plot(sampler, range)
-        lower[] = ARS.lowerhull(sampler).(range)
-        upper[] = ARS.upperhull(sampler).(range)
+        lower[] = ARS.eval_hull.(ARS.lowerhull(sampler), range)
+        upper[] = ARS.eval_hull.(ARS.upperhull(sampler), range)
         obj[] = ARS.objective(sampler).f.(range)
         minmin = min(minimum(upper[]), minimum(obj[]))
         lastinf = findfirst(!isinf, lower[])
@@ -50,7 +50,7 @@ function MakieCore.plot!(samplerplt::SamplerPlot{<:Tuple{
                 range[firstinf], minmin)]
     end
 
-    MakieCore.Observables.onany(update_plot, sam, rang)
+    onany(update_plot, sam, rang)
     update_plot(sam[], rang[])
 
     lines!(samplerplt, rang, obj, color = samplerplt[:objectivecolor])

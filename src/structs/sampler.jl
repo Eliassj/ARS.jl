@@ -23,6 +23,10 @@ support(s::RejectionSampler) = s.support
 max_segments(s::RejectionSampler) = s.max_segments
 max_failed_rate(s::RejectionSampler) = s.max_failed_rate
 
+function sample!(sampler::RejectionSampler, n_samples::Integer)
+    
+end
+
 function plotsampler end
 
 function samplerplot end

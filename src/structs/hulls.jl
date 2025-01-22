@@ -1,5 +1,6 @@
 """
 Abstract type for lines.
+using Base: eval_user_input
 
 Should contain the fields `intercept` and `slope`.
 """
@@ -10,11 +11,44 @@ struct Line{T <: Number} <: AbstractLine{T}
     intercept::T
 end
 
+Base.broadcastable(o::AbstractLine) = Ref(o)
+
 """
 Evaluate a `Line` at `x`.
 """
 function (l::Line)(x)
     l.slope * x + l.intercept
+end
+
+function eval_line(l::Line, x)
+    l.slope * x + l.intercept
+end
+
+"""
+    eval_line(l::Line, x::Vector{T}) where {T}
+
+Evaluate a line at points in `x`.
+"""
+function eval_line(l::Line, x::Vector{T}) where {T}
+    out = similar(x)
+    eval_line!(out, l, x)
+    return out
+end
+
+"""
+    eval_line!(out::Vector{T}, l::Line, x::Vector{T}) where {T}
+
+Evaluate a line at points in `x` and store the result in `out`.
+
+**Does not check bounds nor that `out` is the same length as `x`!**
+"""
+function eval_line!(out::Vector{T}, l::Line, x::Vector{T}) where {T}
+    slope = l.slope
+    intercept = l.intercept
+    @inbounds @simd for i in eachindex(out)
+        out[i] = slope * x[i] + intercept
+    end
+    return nothing
 end
 
 "Returns slope of an `AbstractLine`"
@@ -34,6 +68,34 @@ function intersection(lines::AbstractVector{<:Line})
     v1 = @view lines[begin:(end - 1)]
     v2 = @view lines[(begin + 1):end]
     intersection.(v1, v2)
+end
+
+# Calculates the integral for `line` between points x1 and x2.
+function line_exp_integral(line::Line, x1::Number, x2::Number)
+    slope = line.slope
+    intercept = line.intercept
+    # Handle case when slope is zero
+    if iszero(slope)
+        return exp(intercept) * (x2 - x1)
+    else
+        return ((exp(intercept + x2 * slope) -
+                 exp(intercept + x1 * slope)) / slope)
+    end
+end
+
+function line_exp_integral_at(line::Line, x::Number)
+    if iszero(line.slope)
+        exp(line.intercept) * x
+    else
+        exp(line.slope * x + line.intercept) / line.slope
+    end
+end
+
+function line_inv_exp_integral(line::Line, x::Number)
+    k = line.slope
+    m = line.intercept
+
+    (log(x / k) - m) / k
 end
 
 abstract type AbstractHull{T} end
@@ -70,23 +132,63 @@ struct UpperHull{T} <: AbstractHull{T}
     end
 end
 
+Base.broadcastable(o::AbstractHull) = Ref(o)
+
 """
 Evaluate a hull at `x`.
 """
-function (hull::UpperHull)(x::Number)
-    v = findfirst(>=(x), hull.intersections)
-    isnothing(v) && return hull.lines[end](x)
+function eval_hull(hull::UpperHull, x::Number)
+    v = searchsortedfirst(hull.intersections, x)
+    if v > length(hull.lines)
+        v -= 1
+    end
     return hull.lines[v](x)
+end
+
+"""
+Evaluate the area/CDF under `exp(u(x))` between `ld` and `ud` where `u(x)` is the upper hull.
+"""
+function hull_exp_integral(
+        hull::UpperHull{T}, ld = -Inf, ud = Inf) where {T <: AbstractFloat}
+    breakpoints = hull.intersections
+    res = zero(T)
+
+    vstart = searchsortedfirst(breakpoints, ld)
+    vend = searchsortedfirst(breakpoints, ud)
+
+    lins = @view lines(hull)[vstart:min(vend, length(lines(hull)))]
+
+    @views begin
+        res += line_exp_integral(lins[begin], ld, breakpoints[vstart])
+        res += line_exp_integral(lins[end], breakpoints[min(length(breakpoints), vend)], ud)
+
+        for (line, i) in zip(lins[(begin + 1):(end - 1)], (vstart + 1):(vend - 1))
+            res += line_exp_integral(line, breakpoints[i - 1], breakpoints[i])
+        end
+    end
+    return res
+end
+
+function hull_exp_integral_at(hull::UpperHull, x)
+    v = searchsortedfirst(hull.intersections, x)
+    if v > length(hull.lines)
+        v -= 1
+    end
+    line_exp_integral(hull.lines[v], -Inf, x)
+end
+
+function sample_hull(hull::UpperHull)
 end
 
 function abscissae(hull::UpperHull)
     hull.abscissae
 end
 
+# NOTE: Avoided broadcasting here since it introduces type instability for the objective function
 function upperlines(f::Objective, points::AbstractVector{T}) where {T <: Number}
     issorted(points) || throw(ArgumentError("`points` should be sorted."))
-    grads = f.grad.(points)
-    ints = @. grads * (-points) + f.f(points)
+    grads = [f.grad(points[i]) for i in eachindex(points)]
+    ints = [grads[i] * (-points[i]) + f.f(points[i]) for i in eachindex(points)]
     [Line(grads[i], ints[i]) for i in eachindex(points)]
 end
 
@@ -103,7 +205,7 @@ struct LowerHull{T} <: AbstractHull{T}
         slopes = slope(obj, absc)
 
         xv = @view absc[begin:(end - 1)]
-        ints = @. slopes * (-xv) + obj.f(xv)
+        ints = [slopes[i] * (-xv[i]) + obj.f(xv[i]) for i in eachindex(slopes)]
 
         lines = [Line(slopes[i], ints[i]) for i in eachindex(slopes)]
 
@@ -111,11 +213,12 @@ struct LowerHull{T} <: AbstractHull{T}
     end
 end
 
-function (hull::LowerHull)(x::Number)
+function eval_hull(hull::LowerHull, x::Number)
     v = let x = x
         findfirst(i -> i >= x, intersections(hull))
     end
-    if isnothing(v) || isone(v)
+    v = searchsortedfirst(intersections(hull), x)
+    if v == 1 || v > length(intersections(hull))
         return -Inf
     end
     return hull.lines[v - 1](x)
