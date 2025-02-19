@@ -169,12 +169,45 @@ function hull_exp_integral(
     return res
 end
 
-function hull_exp_integral_at(hull::UpperHull, x)
+function hull_piece_at(hull::UpperHull, x)
     v = searchsortedfirst(hull.intersections, x)
-    if v > length(hull.lines)
-        v -= 1
+    v > length(hull.lines) ? v - 1 : v
+end
+
+function hull_exp_cdf_inv(hull::UpperHull, lower_support::T, x::T) where {T}
+    breakpoints = hull.intersections
+    res = zero(T)
+
+    lins = lines(hull)
+
+    last_breakpoint = zero(T)
+
+    seg_with_x = 1
+    @views begin
+        res += line_exp_integral(lins[1], lower_support, breakpoints[begin])
+        iter = zip(lins[(begin + 1):end], 2:(length(lins) - 1))
+        i = 2
+        for line in lins[(begin + 1):end]
+            tmp = line_exp_integral(line, breakpoints[i - 1], breakpoints[i])
+            # If we've passed x, break
+            if res + tmp >= x
+                break
+            else
+                res += tmp
+                last_breakpoint = breakpoints[i]
+                i += 1
+                seg_with_x = i
+            end
+        end
     end
-    line_exp_integral(hull.lines[v], -Inf, x)
+
+    k = slope(lins[seg_with_x])
+    m = intercept(lins[seg_with_x])
+    #t = (log(((x * k) / exp(m)) + exp(last_breakpoint * k))) / k
+    @show res
+    @show x
+    t = (log((x - res) / k) - 2 * m) / (2 * k)
+    last_breakpoint + t
 end
 
 function sample_hull(hull::UpperHull)
