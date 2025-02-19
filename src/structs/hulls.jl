@@ -1,6 +1,5 @@
 """
 Abstract type for lines.
-using Base: eval_user_input
 
 Should contain the fields `intercept` and `slope`.
 """
@@ -13,6 +12,7 @@ end
 
 Base.broadcastable(o::AbstractLine) = Ref(o)
 
+# TODO: Deprecate this
 """
 Evaluate a `Line` at `x`.
 """
