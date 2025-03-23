@@ -37,17 +37,16 @@ end
 
 function sample_upper_hull!(
         out::Vector{T}, sam::RejectionSampler{T}, n_samples::Integer) where {T}
-    @info "Sampling upper hull!"
     rs = rand(n_samples)
-    @show rs
-    @. out = hull_exp_cdf_inv(sam.upperhull, sam.support[1], rs) /
+    @. out = hull_exp_cdf_inv(sam.upperhull, sam.support[1], sam.upperhull_integral[], rs) /
              sam.upperhull_integral[]
 end
 
 function sample_upper_hull(
         sam::RejectionSampler{T}, n_samples::Integer) where {T}
     out = Vector{T}(undef, n_samples)
-    @. out = hull_exp_cdf_inv(sam.upperhull, sam.support[1], $rand(n_samples)) /
+    @. out = hull_exp_cdf_inv(
+        sam.upperhull, sam.support[1], sam.upperhull_integral[], $rand(n_samples)) /
              sam.upperhull_integral[]
 end
 
@@ -63,7 +62,6 @@ function sample!(
         w = @view w_og[not_accepted]
         out = @view outv[not_accepted]
         for i in eachindex(w, out)
-            @show w[i]
             if w[i] <= exp(eval_hull(lowerhull(sampler), out[i]) -
                    eval_hull(upperhull(sampler), out[i]))
                 # Accept x[i]
@@ -77,7 +75,6 @@ function sample!(
             else
                 # Reject x[i] and sample new values
                 out[i] = sample_upper_hull(sampler)
-                w[i] = rand()
             end
         end
     end

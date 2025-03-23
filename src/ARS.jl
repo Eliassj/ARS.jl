@@ -1,3 +1,6 @@
+"""
+ARS.jl implements an adaptive rejection sampler.
+"""
 module ARS
 
 import ForwardDiff: derivative
@@ -72,6 +75,5 @@ function gen_alphafun(k, n)
     end
     f
 end
-
 
 end

@@ -178,39 +178,43 @@ function hull_piece_at(hull::UpperHull, x)
     v > length(hull.lines) ? v - 1 : v
 end
 
-function hull_exp_cdf_inv(hull::UpperHull, lower_support::T, x::T) where {T}
+function hull_exp_cdf_inv(
+        hull::UpperHull, lower_support::T, hull_integral::T, x::T) where {T}
     breakpoints = hull.intersections
     res = zero(T)
-
     lins = lines(hull)
 
     last_breakpoint = zero(T)
 
     seg_with_x = 1
     @views begin
-        res += line_exp_integral(lins[1], lower_support, breakpoints[begin])
-        @show res
-        i = 2
-        for line in lins[(begin + 1):end]
-            @show i
-            tmp = line_exp_integral(line, breakpoints[i - 1], breakpoints[i])
-            # If we've passed x or is at the last segment, break
-            if res + tmp >= x
-                break
-            else
-                res += tmp
-                @show res
-                last_breakpoint = breakpoints[i]
-                @show last_breakpoint
-                i += 1
-                @show seg_with_x = i
-                @show length(breakpoints)
-                if i > length(breakpoints)
+        tmp = line_exp_integral(lins[1], lower_support, breakpoints[begin]) / hull_integral
+        @show tmp
+        if tmp < x
+            res += tmp
+            i = 2
+            for line in lins[(begin + 1):end]
+                tmp = line_exp_integral(line, breakpoints[i - 1], breakpoints[i]) /
+                      hull_integral
+                # If we've passed x, break
+                @show res + tmp
+                if res + tmp >= x
                     break
+                else
+                    res += tmp
+                    last_breakpoint = breakpoints[i]
+                    i += 1
+                    seg_with_x += 1
+                    # If we've passed the last breakpoint, break
+                    if i > length(breakpoints)
+                        break
+                    end
                 end
             end
         end
     end
+    @show x
+    @show seg_with_x
 
     k = slope(lins[seg_with_x])
     m = intercept(lins[seg_with_x])
