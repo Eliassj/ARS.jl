@@ -2,6 +2,7 @@ module ARS
 
 import ForwardDiff: derivative
 using DocStringExtensions
+import SpecialFunctions: loggamma, loggammadiv
 
 include("doctemplates.jl")
 
@@ -57,5 +58,20 @@ end
 y = kx + b
 y = b
 =#
+
+function gen_alphafun(k, n)
+    f = let k = k, n = n
+        function (a)
+            alpha = exp(a)
+            a +
+            a * (k - 3 / 2) +
+            (-1 / (2 * alpha)) +
+            loggamma(alpha) -
+            loggamma(n + alpha)
+        end
+    end
+    f
+end
+
 
 end

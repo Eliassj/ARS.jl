@@ -42,7 +42,13 @@ function Makie.plot!(samplerplt::SamplerPlot{<:Tuple{
         obj[] = ARS.objective(sampler).f.(range)
         minmin = min(minimum(upper[]), minimum(obj[]))
         lastinf = findfirst(!isinf, lower[])
-        firstinf = findfirst(isinf, @view(lower[][(lastinf):end])) - 2 + lastinf
+        firstinf = findfirst(isinf, @view(lower[][(lastinf):end]))
+        if !isnothing(firstinf)
+            firstinf -= (2 + lastinf)
+        else
+            firstinf = lastinf
+        end
+
         lowerneg1[] = [
             Point2f64(range[lastinf], lower[][lastinf]), Point2f64(range[lastinf], minmin)]
         lowerneg2[] = [
