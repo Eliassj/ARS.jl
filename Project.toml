@@ -6,6 +6,7 @@ version = "1.0.0-DEV"
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+PProf = "e4faabce-9ead-11e9-39d9-4379958e3056"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [weakdeps]
@@ -18,5 +19,6 @@ MakieExt = "Makie"
 DocStringExtensions = "0.9.3"
 ForwardDiff = "0.10.38"
 Makie = "0.22.1"
+PProf = "3.2.0"
 SpecialFunctions = "2.5.0"
 julia = "1.11"

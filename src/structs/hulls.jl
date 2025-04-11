@@ -20,6 +20,11 @@ function (l::Line)(x)
     l.slope * x + l.intercept
 end
 
+"""
+    eval_line(l::Line, x)
+
+Evaluate line at `x`.
+"""
 function eval_line(l::Line, x)
     l.slope * x + l.intercept
 end
@@ -83,6 +88,11 @@ function line_exp_integral(line::Line, x1::Number, x2::Number)
     end
 end
 
+function line_log_exp_integral(line::Line, x1::Number, x2::Number)
+    line.intercept + x2 * line.slope - log(line.slope) + log(1 - exp(line.intercept * (x1
+                                  - x2)))
+end
+
 function line_exp_integral_at(line::Line, x::Number)
     if iszero(line.slope)
         exp(line.intercept) * x
@@ -96,6 +106,23 @@ function line_inv_exp_integral(line::Line, x::Number)
     m = line.intercept
 
     (log(x / k) - m) / k
+end
+
+@doc raw"""
+    line_exp_inv_cdf(line::Line, lower::T, x::T) where {T}
+
+Calculates the inverse of ``\int_{lower}^{x} \frac{exp(ka + m)}{c}``
+
+Where ``c`` is the integral across the domain of the upper hull.
+"""
+function line_exp_inv_cdf(line::Line, res::T, c::T, lower::T, x::T) where {T}
+    if iszero(line.slope)
+        return ((x - res) * c / exp(line.intercept)) + lower
+    else
+        return (log((x - res) * line.slope * c + exp(line.intercept + lower * line.slope)) -
+                line.intercept) /
+               line.slope
+    end
 end
 
 abstract type AbstractHull{T} end
@@ -121,14 +148,25 @@ struct UpperHull{T} <: AbstractHull{T}
     abscissae::Vector{T}
     "Vector of lines."
     lines::Vector{Line{T}}
+    "Weights of each line."
+    weights::Vector{T}
     "Points where lines intersect."
     intersections::Vector{T}
 
-    function UpperHull(obj::Objective, abscissae::Vector{T}) where {T}
+    function UpperHull(obj::Objective, abscissae::Vector{T}, support::Tuple{T, T}) where {T}
         lines = upperlines(obj, abscissae)
         intersections = intersection(lines)
 
-        new{T}(abscissae, lines, intersections)
+        ws = Vector{T}(undef, length(lines))
+
+        ws[begin] = line_exp_integral(lines[begin], support[1], intersections[begin])
+        ws[end] = line_exp_integral(lines[end], intersections[end], support[2])
+        for i in 2:(length(lines) - 1)
+            ws[i] = line_exp_integral(
+                lines[i], intersections[i - 1], intersections[i])
+        end
+
+        new{T}(abscissae, lines, ws, intersections)
     end
 end
 
@@ -154,21 +192,15 @@ Evaluate the area/CDF under `exp(u(x))` between `ld` and `ud` where `u(x)` is th
 """
 function hull_exp_integral(
         hull::UpperHull{T}, ld = -Inf, ud = Inf) where {T <: AbstractFloat}
-    breakpoints = hull.intersections
     res = zero(T)
+    lins = lines(hull)
+    breakpoints = intersections(hull)
 
-    vstart = searchsortedfirst(breakpoints, ld)
-    vend = searchsortedfirst(breakpoints, ud)
+    res += line_exp_integral(lins[begin], ld, breakpoints[begin])
+    res += line_exp_integral(lins[end], breakpoints[end], ud)
 
-    lins = @view lines(hull)[vstart:min(vend, length(lines(hull)))]
-
-    @views begin
-        res += line_exp_integral(lins[begin], ld, breakpoints[vstart])
-        res += line_exp_integral(lins[end], breakpoints[min(length(breakpoints), vend)], ud)
-
-        for (line, i) in zip(lins[(begin + 1):(end - 1)], (vstart + 1):(vend - 1))
-            res += line_exp_integral(line, breakpoints[i - 1], breakpoints[i])
-        end
+    for i in 1:(length(lins) - 2)
+        res += line_exp_integral(lins[i + 1], breakpoints[i], breakpoints[i + 1])
     end
     return res
 end
@@ -189,32 +221,31 @@ function hull_exp_cdf_inv(
     seg_with_x = 1
     @views begin
         tmp = line_exp_integral(lins[1], lower_support, breakpoints[begin]) / hull_integral
-        @show tmp
         if tmp < x
             res += tmp
             i = 2
-            for line in lins[(begin + 1):end]
-                tmp = line_exp_integral(line, breakpoints[i - 1], breakpoints[i]) /
-                      hull_integral
-                # If we've passed x, break
-                @show res + tmp
-                if res + tmp >= x
-                    break
-                else
-                    res += tmp
-                    last_breakpoint = breakpoints[i]
-                    i += 1
-                    seg_with_x += 1
-                    # If we've passed the last breakpoint, break
-                    if i > length(breakpoints)
+            seg_with_x += 1
+            if length(breakpoints) > 1
+                for line in lins[(begin + 1):end]
+                    tmp = line_exp_integral(line, breakpoints[i - 1], breakpoints[i])
+                    tmp /= hull_integral
+                    # If we've passed x, break
+                    if res + tmp >= x
                         break
+                    else
+                        res += tmp
+                        last_breakpoint = breakpoints[i]
+                        i += 1
+                        seg_with_x += 1
+                        # If we've passed the last breakpoint, break
+                        if i > length(breakpoints)
+                            break
+                        end
                     end
                 end
             end
         end
     end
-    @show x
-    @show seg_with_x
 
     k = slope(lins[seg_with_x])
     m = intercept(lins[seg_with_x])

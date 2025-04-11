@@ -5,16 +5,6 @@ import Makie: Observable
 using ARS
 import ARS: samplerplot, samplerplot!
 
-# function ARS.plotsampler(s::ARS.RejectionSampler, range::AbstractRange)
-#     f = Figure()
-#     ax = Axis(f[1, 1])
-
-#     lines!(ax, range, ARS.objective(s).(range))
-#     lines!(ax, range, ARS.eval_hull.(ARS.lowerhull, range))
-#     lines!(ax, range, ARS.upperhull, range))
-#     return f
-# end
-
 @recipe(SamplerPlot, r) do scene
     Attributes(
         objectivecolor = :blue,

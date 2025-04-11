@@ -10,7 +10,7 @@ struct RejectionSampler{T}
 
     function RejectionSampler(f::Objective, initial_points::AbstractVector{T},
             support::Tuple{T, T} = (typemin(T), typemax(T)), max_segments::Integer = 25, max_failed_rate::AbstractFloat = 0.001) where {T}
-        upper = UpperHull(f, initial_points, support)
+        upper = UpperHull(f, initial_points)
         upper_integral = hull_exp_integral(upper, support[1], support[2])
         lower = LowerHull(f, upper)
 
@@ -18,45 +18,12 @@ struct RejectionSampler{T}
     end
 end
 
-Base.broadcastable(s::RejectionSampler) = Ref(s)
-
 objective(s::RejectionSampler) = s.objective
 upperhull(s::RejectionSampler) = s.upperhull
-upperhull_integral(s::RejectionSampler) = s.upperhull_integral[]
 lowerhull(s::RejectionSampler) = s.lowerhull
 support(s::RejectionSampler) = s.support
 max_segments(s::RejectionSampler) = s.max_segments
 max_failed_rate(s::RejectionSampler) = s.max_failed_rate
-
-function upper_hull_exp_cdf_inv(sam::RejectionSampler{T}, x::T) where {T <: AbstractFloat}
-    hull = upperhull(sam)
-    lins = lines(hull)
-    lower_support = support(sam)[1]
-    hull_integral = upperhull_integral(sam)
-    breakpoints = intersections(upperhull(sam))
-
-    # Accumulate integral
-    res = zero(T)
-
-    # Save the last breakpoint
-    last_breakpoint = lower_support
-
-    # Determine at what segment x is located. First segment has to be handled differently
-    # tmp = line_exp_integral(lins[begin], lower_support, breakpoints[begin])
-    seg_with_x = 1
-    for i in eachindex(breakpoints)
-        tmp = res +
-              line_exp_integral(lins[i], last_breakpoint, breakpoints[i]) /
-              hull_integral
-        @show tmp
-        tmp > x && break # If we've passed `x`, exit loop
-        # Else, add tmp to res and update breakpoint
-        res = tmp
-        seg_with_x += 1
-        last_breakpoint = breakpoints[i]
-    end
-    return line_exp_inv_cdf(lins[seg_with_x], res, hull_integral, last_breakpoint, x)
-end
 
 """
     sample_hull(hull::UpperHull)
@@ -65,19 +32,23 @@ Draws a single sample from the upper hull
 """
 function sample_upper_hull(sam::RejectionSampler)
     # Sample point
-    upper_hull_exp_cdf_inv(sam, rand())
+    hull_exp_cdf_inv(sam.upperhull, sam.support[1], rand()) / sam.upperhull_integral[]
 end
 
 function sample_upper_hull!(
-        out::AbstractVector{T}, sam::RejectionSampler{T}, n_samples::Integer) where {T}
+        out::Vector{T}, sam::RejectionSampler{T}, n_samples::Integer) where {T}
+    @info "Sampling upper hull!"
     rs = rand(n_samples)
-    @. out = upper_hull_exp_cdf_inv(sam, rs)
+    @show rs
+    @. out = hull_exp_cdf_inv(sam.upperhull, sam.support[1], rs) /
+             sam.upperhull_integral[]
 end
 
 function sample_upper_hull(
         sam::RejectionSampler{T}, n_samples::Integer) where {T}
     out = Vector{T}(undef, n_samples)
-    @. out = upper_hull_exp_cdf_inv(sam, $rand(n_samples))
+    @. out = hull_exp_cdf_inv(sam.upperhull, sam.support[1], $rand(n_samples)) /
+             sam.upperhull_integral[]
 end
 
 function sample!(
@@ -89,10 +60,10 @@ function sample!(
     n_passes = 0
     while n_accepted < n_samples
         n_passes += 1
-        n_passes % 100 == 0 && println("pass: ", n_passes)
         w = @view w_og[not_accepted]
         out = @view outv[not_accepted]
         for i in eachindex(w, out)
+            @show w[i]
             if w[i] <= exp(eval_hull(lowerhull(sampler), out[i]) -
                    eval_hull(upperhull(sampler), out[i]))
                 # Accept x[i]
@@ -106,6 +77,7 @@ function sample!(
             else
                 # Reject x[i] and sample new values
                 out[i] = sample_upper_hull(sampler)
+                w[i] = rand()
             end
         end
     end
