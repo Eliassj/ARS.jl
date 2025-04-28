@@ -5,20 +5,20 @@ version = "1.0.0-DEV"
 
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+DoubleFloats = "497a8b3b-efae-58df-a0af-a86822472b78"
+Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 PProf = "e4faabce-9ead-11e9-39d9-4379958e3056"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
-
-[weakdeps]
-Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
-
-[extensions]
-MakieExt = "Makie"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 DocStringExtensions = "0.9.3"
+DoubleFloats = "1.4.3"
+Enzyme = "0.13.35"
 ForwardDiff = "0.10.38"
-Makie = "0.22.1"
 PProf = "3.2.0"
+Random = "1.11.0"
 SpecialFunctions = "2.5.0"
-julia = "1.11"
+StatsBase = "0.34.4"

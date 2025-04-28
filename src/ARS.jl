@@ -3,77 +3,311 @@ ARS.jl implements an adaptive rejection sampler.
 """
 module ARS
 
-import ForwardDiff: derivative
+import Base: OneTo
 using DocStringExtensions
-import SpecialFunctions: loggamma, loggammadiv
+import Enzyme: autodiff, Forward, DuplicatedNoNeed
+import SpecialFunctions: loggamma
+import Base.Iterators: drop, take
+using StatsBase
+using Random
 
 include("doctemplates.jl")
 
-include("structs/objective.jl")
-include("structs/hulls.jl")
-include("structs/sampler.jl")
-
-const DEFAULT_MIN_SLOPE = 1e-6
-const DEFAULT_MAX_SLOPE = 1e6
-
-struct Lines{T}
-    lines::Vector{Line{T}}
-    intersections::Vector{T}
-
-    function Lines(lines::Vector{Line{T}}) where {T}
-        intersections = Vector{T}(undef, length(lines) - 1)
-
-        for i in eachindex(intersections)
-            intersections[i] = intersection(lines[i], lines[i + 1])
-        end
-
-        new{T}(lines, intersections)
-    end
-end
-
-lines(lines::Lines) = lines.lines
-lines(lines::Lines, i::Integer) = lines.lines[i]
-intersections(lines::Lines) = lines.intersections
-intersections(lines::Lines, i::Integer) = lines.intersections[i]
-
-nlines(lines::Lines) = length(lines(lines))
-nintersections(lines::Lines) = length(intersections(lines))
-
-function squeezelines(ob::Objective, upper_lines::Lines{T}) where {T}
-    lins = Vector{Line{T}}(undef, nintersections(upper_lines))
-
-    grads = Vector{T}(undef, length(lins))
-    for i in eachindex(grads)
-        grads[i] = slope(
-            ob, tangent(lines(upper_lines, i)), tangent(lines(upper_lines, i + 1)))
-    end
-    ints = []
-end
-
-function linefun(l::Line)
-    f = let k = l.slope, m = l.intercept
-        x -> k * x + m
-    end
-    f
+function alphatest(k, n, a)
+    alpha = exp(a)
+    a * (k - (3 / 2)) + (-1 / (2 * alpha)) + loggamma(alpha) - loggamma(n + alpha)
 end
 
 #=
-y = kx + b
-y = b
+Objective function including its gradient
 =#
 
-function gen_alphafun(k, n)
-    f = let k = k, n = n
-        function (a)
-            alpha = exp(a)
-            a +
-            a * (k - 3 / 2) +
-            (-1 / (2 * alpha)) +
-            loggamma(alpha) -
-            loggamma(n + alpha)
+struct Objective{F<:Function,G<:Function}
+    f::F
+    grad::G
+end
+
+function Objective(f::Function)
+    let f = f
+        Objective(
+            f,
+            x::AbstractFloat -> autodiff(Forward, f, DuplicatedNoNeed(x, one(x)))[1]
+        )
+    end
+end
+
+#=
+Hulls for sampling and squeezing
+=#
+
+abstract type AbstractHull end
+
+struct UpperHull{T} <: AbstractHull
+    intercepts::Vector{T}
+    slopes::Vector{T}
+    intersections::Vector{T}
+    abscissae::Vector{T}
+    segment_weights::Vector{T}
+    domain::Tuple{T,T}
+end
+
+Base.broadcastable(h::UpperHull) = Ref(h)
+
+slopes(h::UpperHull) = h.slopes
+intercepts(h::UpperHull) = h.intercepts
+intersections(h::UpperHull) = h.intersections
+abscissae(h::UpperHull) = h.abscissae
+"Get line `i` from the hull. Returns a tuple consisting of `(slope, intercept)`."
+line(h::UpperHull, i::Integer) = (h.slopes[i], h.intercepts[i])
+lineinds(h::UpperHull) = Base.OneTo(length(slopes(h)))
+n_lines(h::UpperHull) = length(slopes(h))
+segment_weights(h::UpperHull) = h.segment_weights
+
+function eval_hull(h::UpperHull, x)
+    i = searchsortedfirst(intersections(h), x) - 1
+    sl, int = line(h, i)
+    sl * x + int
+end
+
+function calc_intersects(slopes::AbstractVector{T}, intercepts::AbstractVector{T}) where {T}
+    [intersection(slopes[i], intercepts[i], slopes[i+1], intercepts[i+1])
+     for i in OneTo(length(slopes) - 1)]
+end
+
+function calc_slopes_and_intercepts(obj::Objective, abscissae::AbstractVector{T}) where {T}
+    issorted(abscissae) ||
+        throw(ArgumentError("`abscissae` should be sorted in ascending order."))
+    slopes = [obj.grad(abscissae[i]) for i in eachindex(abscissae)]
+    intercepts = [slopes[i] * (-abscissae[i]) + obj.f(abscissae[i])
+                  for i in eachindex(abscissae)]
+    return slopes, intercepts
+end
+
+function calc_domain_integral_exp(slopes::Vector{T}, intercepts::Vector{T},
+    intersects::Vector{T}, domain::Tuple{T,T}) where {T}
+    res = zero(T)
+    # res += exp_integral_line(
+    #     slopes[begin], intercepts[begin], domain[begin], intersects[end])
+    # res += exp_integral_line(slopes[end], intercepts[end], intersects[end], domain[end])
+    for i in 1:length(slopes)
+        res += exp_integral_line(slopes[i], intercepts[i], intersects[i], intersects[i+1])
+    end
+    return res
+end
+
+"""
+    calc_domain_integral_exp(hull::UpperHull)
+
+Calculate the domain integral of `hull`.
+"""
+function calc_domain_integral_exp(hull::UpperHull)
+    calc_domain_integral_exp(hull.slopes, hull.intercepts, hull.intersections, hull.domain)
+end
+
+"""
+    exp_integral_line(slope, intercept, x1, x2)
+
+Calculate the integral of `exp(slope * x + intercept)` between `x1` and `x2`. Handles a slope of 0.
+"""
+function exp_integral_line(slope, intercept, x1, x2)
+    if !iszero(slope)
+        (exp(slope * x2 + intercept) - exp(slope * x1 + intercept)) / slope
+    else
+        (x2 - x1) * exp(intercept)
+    end
+end
+
+function UpperHull(obj::Objective, abscissae::Vector{T}, domain::Tuple{T,T}) where {T}
+    slopes, intercepts = calc_slopes_and_intercepts(obj, abscissae)
+
+    intersects = [domain[1]; calc_intersects(slopes, intercepts); domain[2]]
+
+    # integ = calc_domain_integral_exp(slopes, intercepts, intersects, domain)
+    wgts = Vector{T}(undef, length(slopes))
+    for i in 1:length(wgts)
+        wgts[i] = exp_integral_line(slopes[i], intercepts[i], intersects[i], intersects[i+1])
+    end
+    UpperHull(intercepts, slopes, intersects, abscissae, wgts, domain)
+end
+
+"""
+    inv_cdf_seg(slope, intercept, r, w, intersect, intersect2)
+
+Calculate the inverse CDF of a segment, handling a slope of zero.
+"""
+@inline function inv_cdf_seg(slope, intercept, r, w, intersect, intersect2)
+    if !iszero(slope)
+        log(exp(-intercept) * r * w * slope + exp(slope * intersect)) / slope
+    else
+        r * (intersect2 - intersect) + intersect
+    end
+end
+
+
+"""
+    sample_hull(h::UpperHull)
+
+Draw a single sample from `h`.
+"""
+function sample_hull(h::UpperHull)
+    ind = sample(1:n_lines(h), weights(segment_weights(h)))
+    sl, int = line(h, ind)
+    inv_cdf_seg(sl, int, rand(), segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
+end
+
+"""
+    sample_hull!(out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where {T}
+
+Draw `n` samples from `h`, storing the result in `out`.
+"""
+function sample_hull!(out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where {T}
+    inds = sample(1:n_lines(h), weights(segment_weights(h)), n)
+    rands = rand(n)
+    for i in eachindex(inds, out, rands)
+        ind = inds[i]
+        sl, int = line(h, ind)
+        out[i] = inv_cdf_seg(sl, int, rands[i], segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
+        # out[i] = log(exp(-int) * rands[i] * h.segment_weights[ind] * sl + exp(sl * h.intersections[ind])) / sl
+    end
+end
+
+function sample_hull!(out::AbstractVector{T}, h::UpperHull) where {T}
+    sample_hull!(out, h, length(out))
+end
+
+"""
+    sample_hull(h::UpperHull{T}, n::Integer) where {T}
+
+Draw `n` samples from `h`.
+"""
+function sample_hull(h::UpperHull{T}, n::Integer) where {T}
+    out = Vector{T}(undef, n)
+    sample_hull!(out, h, n)
+    return out
+end
+
+"""
+Returns the intersection abscissa between 2 lines as defined by their slopes and intercepts. Returns NaN if the lines are paralell.
+"""
+function intersection(slope1::T, intercept1::T, slope2::T, intercept2::T) where {T}
+    (intercept2 - intercept1) / (slope1 - slope2)
+end
+
+struct LowerHull{T}
+    intercepts::Vector{T}
+    slopes::Vector{T}
+    intersections::Vector{T}
+end
+
+Base.broadcastable(h::LowerHull) = Ref(h)
+
+
+intercepts(h::LowerHull) = h.intercepts
+slopes(h::LowerHull) = h.slopes
+intersections(h::LowerHull) = h.intersections
+line(h::LowerHull, i) = (h.slopes[i], h.intercepts[i])
+
+function LowerHull(upper::UpperHull{T}, obj::Objective) where {T}
+    intersections = abscissae(upper)
+    n_segs = length(intersections) - 1
+    sl = Vector{T}(undef, n_segs)
+    int = Vector{T}(undef, n_segs)
+
+    for i in eachindex(sl, int)
+        sl[i] = (obj.f(intersections[i+1]) - obj.f(intersections[i])) /
+                (intersections[i+1] - intersections[i])
+        int[i] = sl[i] * (-intersections[i]) + obj.f(intersections[i])
+    end
+
+    return LowerHull(int, sl, intersections)
+end
+
+function eval_hull(h::LowerHull, x)
+    i = searchsortedfirst(intersections(h), x)
+    if isone(i) || i == lastindex(intersections(h)) + 1
+        return -Inf
+    end
+    sl, int = line(h, i - 1)
+    sl * x + int
+end
+
+struct Sampler{T,F,G}
+    objective::Objective{F,G}
+    upper_hull::UpperHull{T}
+    lower_hull::LowerHull{T}
+end
+
+function Sampler(
+    obj::Objective,
+    initial_points::Vector{T},
+    domain::Tuple{T,T}
+) where {T<:AbstractFloat}
+
+    u = UpperHull(obj, initial_points, domain)
+    l = LowerHull(u, obj)
+
+    return Sampler(obj, u, l)
+end
+
+function __sample(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
+    out = Vector{T}(undef, n)
+    n_accepted = zero(n)
+    acc_mask = ones(Bool, n)
+    ws = Vector{T}(undef, n)
+    while n_accepted < n
+        not_accepted = @view out[acc_mask]
+        sample_hull!(not_accepted, s.upper_hull)
+        ws_view = @view ws[acc_mask]
+        rand!(ws_view)
+        for i in eachindex(not_accepted)
+            up = eval_hull(s.upper_hull, not_accepted[i])
+            lo = eval_hull(s.lower_hull, not_accepted[i])
+
+            # Squeeze test
+            if ws_view[i] <= exp(lo - up)
+
+                acc_mask[acc_mask][i] = false
+                n_accepted += 1
+            elseif ws_view[i] <= exp(s.objective.f(not_accepted[i]) - up)
+                # Accept sample i
+                acc_mask[acc_mask][i] = false
+                n_accepted += 1
+            end
         end
     end
-    f
+    return out
+end
+
+# function Base.show(io::IO, s::Sampler{T}) where {T}
+#     print(
+#         "Sampler{", T, "} with:\n",
+#         "\tAbscissae: ", abscissae(s.upper_hull), "\n",
+#         "\tDomain: ", s.upper_hull.domain, "\n"
+#     )
+# end
+
+
+# TODO: This sample is considerably faster, still makes 10k allocations tho :(
+# Fix by preallocating more?
+function __sample2(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
+    out = T[]
+    n_accepted = zero(n)
+    while n_accepted < n
+        x = sample_hull(s.upper_hull)
+        up = eval_hull(s.upper_hull, x)
+        lo = eval_hull(s.lower_hull, x)
+        w = rand()
+        # Squeeze test
+        if w <= exp(lo - up)
+            push!(out, x)
+            n_accepted += 1
+        elseif w <= exp(s.objective.f(x) - up)
+            # Accept sample i
+            push!(out, x)
+            n_accepted += 1
+        end
+    end
+    return out
 end
 
 end
