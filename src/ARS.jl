@@ -3,13 +3,16 @@ ARS.jl implements an adaptive rejection sampler.
 """
 module ARS
 
+using Base: insert_extension_triggers
 import Base: OneTo
 using DocStringExtensions
-import Enzyme: autodiff, Forward, DuplicatedNoNeed
 import SpecialFunctions: loggamma
 import Base.Iterators: drop, take
 using StatsBase
 using Random
+
+using DifferentiationInterface
+import Mooncake
 
 include("doctemplates.jl")
 
@@ -27,11 +30,12 @@ struct Objective{F<:Function,G<:Function}
     grad::G
 end
 
-function Objective(f::Function)
-    let f = f
+function Objective(f::Function, ::Type{T}=Float64; adbackend=AutoMooncake(; config=nothing)) where {T<:AbstractFloat}
+    let f = f, backend = adbackend
+        gradprep = prepare_gradient(f, backend, zero(T))
         Objective(
             f,
-            x::AbstractFloat -> autodiff(Forward, f, DuplicatedNoNeed(x, one(x)))[1]
+            x::AbstractFloat -> gradient(f, gradprep, backend, x)
         )
     end
 end
@@ -59,7 +63,7 @@ intersections(h::UpperHull) = h.intersections
 abscissae(h::UpperHull) = h.abscissae
 "Get line `i` from the hull. Returns a tuple consisting of `(slope, intercept)`."
 line(h::UpperHull, i::Integer) = (h.slopes[i], h.intercepts[i])
-lineinds(h::UpperHull) = Base.OneTo(length(slopes(h)))
+lineinds(h::UpperHull) = OneTo(length(slopes(h)))
 n_lines(h::UpperHull) = length(slopes(h))
 segment_weights(h::UpperHull) = h.segment_weights
 
@@ -72,6 +76,14 @@ end
 function calc_intersects(slopes::AbstractVector{T}, intercepts::AbstractVector{T}) where {T}
     [intersection(slopes[i], intercepts[i], slopes[i+1], intercepts[i+1])
      for i in OneTo(length(slopes) - 1)]
+end
+
+# Calculate intersections, storing the result in out
+function calc_intersects!(out::AbstractVector{T}, slopes::AbstractVector{T}, intercepts::AbstractVector{T}) where {T}
+    for i in eachindex(out)
+        out[i] = intersection(slopes[i], intercepts[i], slopes[i+1], intercepts[i+1])
+    end
+    return nothing
 end
 
 function calc_slopes_and_intercepts(obj::Objective, abscissae::AbstractVector{T}) where {T}
@@ -150,7 +162,8 @@ end
 Draw a single sample from `h`.
 """
 function sample_hull(h::UpperHull)
-    ind = sample(1:n_lines(h), weights(segment_weights(h)))
+    @show segment_weights(h)
+    ind = StatsBase.sample(1:n_lines(h), weights(segment_weights(h)))
     sl, int = line(h, ind)
     inv_cdf_seg(sl, int, rand(), segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
 end
@@ -208,7 +221,7 @@ intersections(h::LowerHull) = h.intersections
 line(h::LowerHull, i) = (h.slopes[i], h.intercepts[i])
 
 function LowerHull(upper::UpperHull{T}, obj::Objective) where {T}
-    intersections = abscissae(upper)
+    intersections = abscissae(upper) # NOTE: This makes them alias each other!
     n_segs = length(intersections) - 1
     sl = Vector{T}(undef, n_segs)
     int = Vector{T}(undef, n_segs)
@@ -249,48 +262,61 @@ function Sampler(
     return Sampler(obj, u, l)
 end
 
-function __sample(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
-    out = Vector{T}(undef, n)
-    n_accepted = zero(n)
-    acc_mask = ones(Bool, n)
-    ws = Vector{T}(undef, n)
-    while n_accepted < n
-        not_accepted = @view out[acc_mask]
-        sample_hull!(not_accepted, s.upper_hull)
-        ws_view = @view ws[acc_mask]
-        rand!(ws_view)
-        for i in eachindex(not_accepted)
-            up = eval_hull(s.upper_hull, not_accepted[i])
-            lo = eval_hull(s.lower_hull, not_accepted[i])
+# Adds a segment with abscissa at `x` to `s`
+function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
 
-            # Squeeze test
-            if ws_view[i] <= exp(lo - up)
+    # Calculate slope, intercept and index of new segment
+    new_slope = s.objective.grad(x)
+    new_intercept = (new_slope * -x) + s.objective.f(x)
+    new_ind = searchsortedfirst(abscissae(s.upper_hull), x)
+    @show n_lines(s.upper_hull)
+    @show new_ind
 
-                acc_mask[acc_mask][i] = false
-                n_accepted += 1
-            elseif ws_view[i] <= exp(s.objective.f(not_accepted[i]) - up)
-                # Accept sample i
-                acc_mask[acc_mask][i] = false
-                n_accepted += 1
-            end
-        end
+
+    # Insert new slope and intercept
+    all_inters = intersections(s.upper_hull)
+    all_slopes = slopes(s.upper_hull)
+    all_intercepts = intercepts(s.upper_hull)
+    insert!(all_slopes, new_ind, new_slope)
+    insert!(all_intercepts, new_ind, new_intercept)
+
+    # Insert new abscissa
+    insert!(abscissae(s.upper_hull), new_ind, x)
+
+
+    # TODO: Only calculate the intersections and weights that actually change.
+    # Recalculate intersection points for segments, fiven the new segment
+    push!(all_inters, all_inters[end]) # Extend intercepts by one
+    calc_intersects!(@view(all_inters[begin+1:end-1]), all_slopes, all_intercepts)
+
+    # Recalculate segment weights
+    all_weights = segment_weights(s.upper_hull)
+    push!(all_weights, zero(T))
+    for i in eachindex(all_weights)
+        all_weights[i] = exp_integral_line(all_slopes[i], all_intercepts[i], all_inters[i], all_inters[i+1])
     end
-    return out
+
+    #= Lower hull time =#
+    # We don't need to add anything to the lower intersections as it is the same vector used for abscissae in the upper hull
+
+    all_inters_lower = intersections(s.lower_hull)
+    @show all_inters_lower
+    # BUG: Fix the indexing here
+    new_slope_lower =
+        (s.objective.f(all_inters_lower[new_ind]) - s.objective.f(all_inters_lower[new_ind-1])) /
+        (all_inters_lower[new_ind] - all_inters_lower[new_ind-1])
+    new_intercept_lower = new_slope_lower * (-all_inters_lower[new_ind]) + s.objective.f(all_inters_lower[new_ind])
+    insert!(slopes(s.lower_hull), new_ind, new_slope_lower)
+    insert!(intercepts(s.lower_hull), new_ind, new_intercept_lower)
+
+
+    return nothing
 end
-
-# function Base.show(io::IO, s::Sampler{T}) where {T}
-#     print(
-#         "Sampler{", T, "} with:\n",
-#         "\tAbscissae: ", abscissae(s.upper_hull), "\n",
-#         "\tDomain: ", s.upper_hull.domain, "\n"
-#     )
-# end
-
 
 # TODO: This sample is considerably faster, still makes 10k allocations tho :(
 # Fix by preallocating more?
-function __sample2(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
-    out = T[]
+function __sample!(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
+    out = Vector{T}(undef, n)
     n_accepted = zero(n)
     while n_accepted < n
         x = sample_hull(s.upper_hull)
@@ -299,15 +325,20 @@ function __sample2(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
         w = rand()
         # Squeeze test
         if w <= exp(lo - up)
-            push!(out, x)
+            out[n_accepted+1] = x
             n_accepted += 1
         elseif w <= exp(s.objective.f(x) - up)
             # Accept sample i
-            push!(out, x)
+            out[n_accepted+1] = x
             n_accepted += 1
+            add_segment!(s, x)
         end
     end
     return out
+end
+
+function sample!(s::Sampler, n::Integer)
+    __sample!(s, n)
 end
 
 end
