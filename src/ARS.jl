@@ -16,6 +16,16 @@ import Mooncake
 
 include("doctemplates.jl")
 
+# Non-mutable weights
+struct AllocFreeWeights{S<:Real,T<:Real,V<:AbstractVector{T}} <: AbstractWeights{S,T,V}
+    values::V
+    sum::S
+
+    function AllocFreeWeights(ws::V, sum::S) where {S<:Real,T<:Real,V<:AbstractVector{T}}
+        new{S,T,V}(ws, sum)
+    end
+end
+
 function alphatest(k, n, a)
     alpha = exp(a)
     a * (k - (3 / 2)) + (-1 / (2 * alpha)) + loggamma(alpha) - loggamma(n + alpha)
@@ -162,8 +172,8 @@ end
 Draw a single sample from `h`.
 """
 function sample_hull(h::UpperHull)
-    @show segment_weights(h)
-    ind = StatsBase.sample(1:n_lines(h), weights(segment_weights(h)))
+    ws = segment_weights(h)
+    ind = sample(ARS.AllocFreeWeights(ws, sum(ws)))
     sl, int = line(h, ind)
     inv_cdf_seg(sl, int, rand(), segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
 end
@@ -180,7 +190,6 @@ function sample_hull!(out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where
         ind = inds[i]
         sl, int = line(h, ind)
         out[i] = inv_cdf_seg(sl, int, rands[i], segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
-        # out[i] = log(exp(-int) * rands[i] * h.segment_weights[ind] * sl + exp(sl * h.intersections[ind])) / sl
     end
 end
 
@@ -220,17 +229,31 @@ slopes(h::LowerHull) = h.slopes
 intersections(h::LowerHull) = h.intersections
 line(h::LowerHull, i) = (h.slopes[i], h.intercepts[i])
 
+function calc_lower_slopes_and_intercepts!(
+    slout::AbstractVector{T}, intout::AbstractVector{T},
+    intersections::AbstractVector{T}, f::Function) where {T}
+
+    for i in eachindex(slout, intout)
+        slout[i] = (f(intersections[i+1]) - f(intersections[i])) /
+                   (intersections[i+1] - intersections[i])
+        intout[i] = slout[i] * (-intersections[i]) + f(intersections[i])
+    end
+    return nothing
+end
+
 function LowerHull(upper::UpperHull{T}, obj::Objective) where {T}
     intersections = abscissae(upper) # NOTE: This makes them alias each other!
     n_segs = length(intersections) - 1
     sl = Vector{T}(undef, n_segs)
     int = Vector{T}(undef, n_segs)
 
-    for i in eachindex(sl, int)
-        sl[i] = (obj.f(intersections[i+1]) - obj.f(intersections[i])) /
-                (intersections[i+1] - intersections[i])
-        int[i] = sl[i] * (-intersections[i]) + obj.f(intersections[i])
-    end
+    calc_lower_slopes_and_intercepts!(sl, int, intersections, obj.f)
+
+    # for i in eachindex(sl, int)
+    #     sl[i] = (obj.f(intersections[i+1]) - obj.f(intersections[i])) /
+    #             (intersections[i+1] - intersections[i])
+    #     int[i] = sl[i] * (-intersections[i]) + obj.f(intersections[i])
+    # end
 
     return LowerHull(int, sl, intersections)
 end
@@ -269,8 +292,6 @@ function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
     new_slope = s.objective.grad(x)
     new_intercept = (new_slope * -x) + s.objective.f(x)
     new_ind = searchsortedfirst(abscissae(s.upper_hull), x)
-    @show n_lines(s.upper_hull)
-    @show new_ind
 
 
     # Insert new slope and intercept
@@ -297,18 +318,20 @@ function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
     end
 
     #= Lower hull time =#
-    # We don't need to add anything to the lower intersections as it is the same vector used for abscissae in the upper hull
+    # We don't need to add anything to the lower intersections as it is the same vector used for abscissae 
+    # in the upper hull
 
     all_inters_lower = intersections(s.lower_hull)
-    @show all_inters_lower
-    # BUG: Fix the indexing here
-    new_slope_lower =
-        (s.objective.f(all_inters_lower[new_ind]) - s.objective.f(all_inters_lower[new_ind-1])) /
-        (all_inters_lower[new_ind] - all_inters_lower[new_ind-1])
-    new_intercept_lower = new_slope_lower * (-all_inters_lower[new_ind]) + s.objective.f(all_inters_lower[new_ind])
-    insert!(slopes(s.lower_hull), new_ind, new_slope_lower)
-    insert!(intercepts(s.lower_hull), new_ind, new_intercept_lower)
-
+    lowerslopes = slopes(s.lower_hull)
+    lowerintercepts = intercepts(s.lower_hull)
+    push!(lowerslopes, zero(T))
+    push!(lowerintercepts, zero(T))
+    calc_lower_slopes_and_intercepts!(
+        lowerslopes,
+        lowerintercepts,
+        all_inters_lower,
+        s.objective.f
+    )
 
     return nothing
 end
