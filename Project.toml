@@ -1,7 +1,7 @@
 name = "ARS"
 uuid = "5744327c-528e-406a-a16f-961c23f1e1d8"
 authors = ["Eliassj <elias.sjolin@gmail.com> and contributors"]
-version = "1.0.0-DEV"
+version = "1.0.1-DEV"
 
 [deps]
 DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
