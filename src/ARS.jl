@@ -1,22 +1,27 @@
 """
 ARS.jl implements an adaptive rejection sampler.
+
+Functions and structs intended for public use are marked as such.
 """
 module ARS
 
-using Base: insert_extension_triggers
 import Base: OneTo
 using DocStringExtensions
 import SpecialFunctions: loggamma
 import Base.Iterators: drop, take
 using StatsBase
-using Random
+import Random: default_rng, AbstractRNG
 
 using DifferentiationInterface
 import Mooncake
 
+
+
 include("doctemplates.jl")
 
-# Non-mutable weights
+"""
+Non-mutable weights used in the `sample` function in this package in order to avoid allocations.
+"""
 struct AllocFreeWeights{S<:Real,T<:Real,V<:AbstractVector{T}} <: AbstractWeights{S,T,V}
     values::V
     sum::S
@@ -144,19 +149,15 @@ function UpperHull(obj::Objective, abscissae::Vector{T}, domain::Tuple{T,T}) whe
 
     intersects = [domain[1]; calc_intersects(slopes, intercepts); domain[2]]
 
-    # integ = calc_domain_integral_exp(slopes, intercepts, intersects, domain)
     wgts = Vector{T}(undef, length(slopes))
     for i in 1:length(wgts)
         wgts[i] = exp_integral_line(slopes[i], intercepts[i], intersects[i], intersects[i+1])
     end
+
     UpperHull(intercepts, slopes, intersects, abscissae, wgts, domain)
 end
 
-"""
-    inv_cdf_seg(slope, intercept, r, w, intersect, intersect2)
-
-Calculate the inverse CDF of a segment, handling a slope of zero.
-"""
+# Calculate the inverse CDF of a segment, handling a slope of zero.
 @inline function inv_cdf_seg(slope, intercept, r, w, intersect, intersect2)
     if !iszero(slope)
         log(exp(-intercept) * r * w * slope + exp(slope * intersect)) / slope
@@ -166,47 +167,39 @@ Calculate the inverse CDF of a segment, handling a slope of zero.
 end
 
 
-"""
-    sample_hull(h::UpperHull)
-
-Draw a single sample from `h`.
-"""
-function sample_hull(h::UpperHull)
+# Draw a single sample from `h`.
+function sample_hull(rng::AbstractRNG, h::UpperHull)
     ws = segment_weights(h)
-    ind = sample(ARS.AllocFreeWeights(ws, sum(ws)))
+    ind = sample(rng, ARS.AllocFreeWeights(ws, sum(ws)))
     sl, int = line(h, ind)
-    inv_cdf_seg(sl, int, rand(), segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
+    inv_cdf_seg(sl, int, rand(rng), segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
 end
+sample_hull(h::UpperHull) = sample_hull(default_rng(), h)
 
-"""
-    sample_hull!(out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where {T}
-
-Draw `n` samples from `h`, storing the result in `out`.
-"""
-function sample_hull!(out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where {T}
-    inds = sample(1:n_lines(h), weights(segment_weights(h)), n)
-    rands = rand(n)
+# Draw `n` samples from `h`, storing the result in `out`.
+function sample_hull!(rng::AbstractRNG, out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where {T}
+    inds = sample(rng, 1:n_lines(h), weights(segment_weights(h)), n)
+    rands = rand(rng, n)
     for i in eachindex(inds, out, rands)
         ind = inds[i]
         sl, int = line(h, ind)
         out[i] = inv_cdf_seg(sl, int, rands[i], segment_weights(h)[ind], intersections(h)[ind], intersections(h)[ind+1])
     end
 end
+sample_hull!(out::AbstractVector{T}, h::UpperHull{T}, n::Integer) where {T} = sample_hull!(default_rng(), out, h, n)
 
-function sample_hull!(out::AbstractVector{T}, h::UpperHull) where {T}
-    sample_hull!(out, h, length(out))
+function sample_hull!(rng, out::AbstractVector{T}, h::UpperHull) where {T}
+    sample_hull!(rng, out, h, length(out))
 end
+sample_hull!(out::AbstractVector{T}, h::UpperHull) where {T} = sample_hull!(default_rng(), out, h)
 
-"""
-    sample_hull(h::UpperHull{T}, n::Integer) where {T}
-
-Draw `n` samples from `h`.
-"""
-function sample_hull(h::UpperHull{T}, n::Integer) where {T}
+# Draw `n` samples from `h`.
+function sample_hull(rng::AbstractRNG, h::UpperHull{T}, n::Integer) where {T}
     out = Vector{T}(undef, n)
-    sample_hull!(out, h, n)
+    sample_hull!(rng, out, h, n)
     return out
 end
+sample_hull(h::UpperHull, n::Integer) = sample_hull(default_rng(), h, n)
 
 """
 Returns the intersection abscissa between 2 lines as defined by their slopes and intercepts. Returns NaN if the lines are paralell.
@@ -249,12 +242,6 @@ function LowerHull(upper::UpperHull{T}, obj::Objective) where {T}
 
     calc_lower_slopes_and_intercepts!(sl, int, intersections, obj.f)
 
-    # for i in eachindex(sl, int)
-    #     sl[i] = (obj.f(intersections[i+1]) - obj.f(intersections[i])) /
-    #             (intersections[i+1] - intersections[i])
-    #     int[i] = sl[i] * (-intersections[i]) + obj.f(intersections[i])
-    # end
-
     return LowerHull(int, sl, intersections)
 end
 
@@ -267,22 +254,32 @@ function eval_hull(h::LowerHull, x)
     sl * x + int
 end
 
+"""
+Struct for holding an objective function to sample from, an upper and a lower hull for adaptive rejection sampling.
+"""
 struct Sampler{T,F,G}
     objective::Objective{F,G}
     upper_hull::UpperHull{T}
     lower_hull::LowerHull{T}
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Initialize an adaptive rejection sampler over a (log) objective function from `obj`. `initial_points` should be a vector of abscissae defining the initial segments of the sampler. At least 2 of the points should be on opposite sides of the objective function's maximum.
+
+$(METHODLIST)
+"""
 function Sampler(
-    obj::Objective,
+    obj::Objective{F,G},
     initial_points::Vector{T},
     domain::Tuple{T,T}
-) where {T<:AbstractFloat}
+) where {T<:AbstractFloat,F<:Function,G<:Function}
 
     u = UpperHull(obj, initial_points, domain)
     l = LowerHull(u, obj)
 
-    return Sampler(obj, u, l)
+    return Sampler{T,F,G}(obj, u, l)
 end
 
 # Adds a segment with abscissa at `x` to `s`
@@ -332,20 +329,18 @@ function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
         all_inters_lower,
         s.objective.f
     )
-
     return nothing
 end
 
-# TODO: This sample is considerably faster, still makes 10k allocations tho :(
-# Fix by preallocating more?
-function __sample!(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
-    out = Vector{T}(undef, n)
-    n_accepted = zero(n)
+# Draw samples from `s`, filling `out`
+function __sample!(rng::AbstractRNG, out::Vector{T}, s::Sampler{T}, add_segments::Bool) where {T<:AbstractFloat}
+    n = length(out)
+    n_accepted = 0
     while n_accepted < n
-        x = sample_hull(s.upper_hull)
+        x = sample_hull(rng, s.upper_hull)
         up = eval_hull(s.upper_hull, x)
         lo = eval_hull(s.lower_hull, x)
-        w = rand()
+        w = rand(rng)
         # Squeeze test
         if w <= exp(lo - up)
             out[n_accepted+1] = x
@@ -354,14 +349,44 @@ function __sample!(s::Sampler{T}, n::Integer) where {T<:AbstractFloat}
             # Accept sample i
             out[n_accepted+1] = x
             n_accepted += 1
+            if add_segments
+                add_segment!(s, x)
+            end
+        elseif add_segments
             add_segment!(s, x)
         end
     end
+    return nothing
+end
+__sample!(out::Vector{T}, s::Sampler{T}, add_segments::Bool) where {T} = __sample!(default_rng(), out, s, add_segments)
+
+# Draw `n` samples, returning a newly allocated vector.
+function __sample!(rng::AbstractRNG, s::Sampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat}
+    out = Vector{T}(undef, n)
+    __sample!(rng, out, s, add_segments)
     return out
 end
+__sample!(s::Sampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat} = __sample!(default_rng(), s, n, add_segments)
 
-function sample!(s::Sampler, n::Integer)
-    __sample!(s, n)
+"""
+$TYPEDSIGNATURES
+
+Draw `n` samples from `s`. Adds segments to `s` whenever the objective function of `s` is evaluated in order to speed up future sampling. This can be disabled by setting `add_segments=false`.
+"""
+function sample!(rng::AbstractRNG, s::Sampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat}
+    __sample!(rng, s, n, add_segments)
 end
+sample!(s::Sampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat} = sample!(default_rng(), s, n, add_segments)
+
+"""
+$TYPEDSIGNATURES
+
+Fill the vector `v` with samples from `s`. Adds segments to `s` whenever the objective function of `s` is evaluated in order to speed up future sampling. This can be disabled by setting `add_segments=false`. Returns `nothing`.
+"""
+function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::Sampler{T}, add_segments::Bool=true) where {T}
+    __sample!(rng, v, s, add_segments)
+    return nothing
+end
+sample!(v::AbstractVector{T}, s::Sampler{T}, add_segments::Bool=true) where {T} = sample!(default_rng(), v, s, add_segments)
 
 end
