@@ -15,20 +15,28 @@ import Random: default_rng, AbstractRNG
 using DifferentiationInterface
 import Mooncake
 
+using Compat
+
 
 
 include("doctemplates.jl")
 
+@compat public Objective, ARSampler
+
 """
 Non-mutable weights used in the `sample` function in this package in order to avoid allocations.
 """
-struct AllocFreeWeights{S<:Real,T<:Real,V<:AbstractVector{T}} <: AbstractWeights{S,T,V}
+struct AllocFreeWeights{S<:Real,T<:Number,V<:AbstractVector{T}} <: AbstractWeights{S,T,V}
     values::V
     sum::S
 
-    function AllocFreeWeights(ws::V, sum::S) where {S<:Real,T<:Real,V<:AbstractVector{T}}
+    function AllocFreeWeights(ws::V, sum::S) where {S<:Real,T<:Number,V<:AbstractVector{T}}
         new{S,T,V}(ws, sum)
     end
+end
+
+function AllocFreeWeights(ws::V) where {T<:Number,V<:AbstractVector{T}}
+    AllocFreeWeights(ws, sum(ws))
 end
 
 function alphatest(k, n, a)
@@ -40,14 +48,52 @@ end
 Objective function including its gradient
 =#
 
+"""
+Struct representing an (unnormalized) density from which to sample.
+
+$(TYPEDFIELDS)
+
+Both `f` and `grad` should be single-argument functions.
+
+"""
 struct Objective{F<:Function,G<:Function}
+    "The (log-concave) function defining the density `f(x) -> y`"
     f::F
+    "Its gradient `grad(x) -> y'`"
     grad::G
+
+    @doc """
+    $(TYPEDSIGNATURES)
+
+    Create an `Objective` directly defined by its function `f` and custom gradient `grad`.
+
+
+    !!! warning
+        Observe that `f` should be in its
+        log-concave form and that no checks are performed in order to verify this.
+    """
+    function Objective(f::Function, grad::Function)
+        new{typeof(f),typeof(grad)}(f, grad)
+    end
 end
 
-function Objective(f::Function, ::Type{T}=Float64; adbackend=AutoMooncake(; config=nothing)) where {T<:AbstractFloat}
+@doc """
+$(SIGNATURES)
+
+Create an [`Objective`](@ref) for a function automatically generating its gradient.
+Gradients are calculated using `DifferentiationInterface.jl` using the backend of choice
+with `Mooncake.jl` being the default. In order to prepare the gradient an initial value is
+required. By default this is `one(Float64)`. If a gradient for a different type is
+desired, it should be specified. 
+
+
+!!! warning
+    Observe that `f` should be in its
+    log-concave form and that no checks are performed in order to verify this.
+"""
+function Objective(f::Function, adbackend=AutoMooncake(; config=nothing), init=one(Float64)) where {T<:AbstractFloat}
     let f = f, backend = adbackend
-        gradprep = prepare_gradient(f, backend, zero(T))
+        gradprep = prepare_gradient(f, backend, init)
         Objective(
             f,
             x::AbstractFloat -> gradient(f, gradprep, backend, x)
@@ -82,6 +128,9 @@ lineinds(h::UpperHull) = OneTo(length(slopes(h)))
 n_lines(h::UpperHull) = length(slopes(h))
 segment_weights(h::UpperHull) = h.segment_weights
 
+"""
+Eval hull `h` at `x`.
+"""
 function eval_hull(h::UpperHull, x)
     i = searchsortedfirst(intersections(h), x) - 1
     sl, int = line(h, i)
@@ -270,7 +319,7 @@ Initialize an adaptive rejection sampler over a (log) objective function from `o
 
 $(METHODLIST)
 """
-function Sampler(
+function ARSampler(
     obj::Objective{F,G},
     initial_points::Vector{T},
     domain::Tuple{T,T}

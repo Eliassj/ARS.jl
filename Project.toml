@@ -4,6 +4,7 @@ authors = ["Eliassj <elias.sjolin@gmail.com> and contributors"]
 version = "1.0.1-DEV"
 
 [deps]
+Compat = "34da2185-b29b-5c13-b0c7-acf172513d20"
 DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
@@ -12,9 +13,11 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+Compat = "4.17.0"
 DifferentiationInterface = "0"
 DocStringExtensions = "0"
 Mooncake = "0"
 Random = "1"
 SpecialFunctions = "2"
 StatsBase = "0.34"
+julia = "1"
