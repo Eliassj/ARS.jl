@@ -2,13 +2,13 @@
 CurrentModule = ARS
 ```
 
-# Developer docs
+# Public API
 
 ```@index
-Pages=["devdocs.md"]
+Pages=["api.md"]
 ```
 
 ```@autodocs
 Modules = [ARS]
-Public = false
+Private = false
 ```
