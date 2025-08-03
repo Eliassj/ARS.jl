@@ -15,9 +15,11 @@ makedocs(;
     pages=[
         "Home" => "index.md",
     ],
+    remotes=nothing,
+    checkdocs=:public
 )
 
-deploydocs(;
-    repo="github.com/Eliassj/ARS.jl",
-    devbranch="master",
-)
+# deploydocs(;
+#     repo="github.com/Eliassj/ARS.jl",
+#     devbranch="master",
+# )

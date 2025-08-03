@@ -21,7 +21,7 @@ using Compat
 
 include("doctemplates.jl")
 
-@compat public Objective, ARSampler
+@compat public Objective, ARSampler, sample!
 
 """
 Non-mutable weights used in the `sample` function in this package in order to avoid allocations.
@@ -44,17 +44,21 @@ function alphatest(k, n, a)
     a * (k - (3 / 2)) + (-1 / (2 * alpha)) + loggamma(alpha) - loggamma(n + alpha)
 end
 
+
 #=
 Objective function including its gradient
 =#
 
 """
-Struct representing an (unnormalized) density from which to sample.
+Struct representing an (unnormalized) log-concave density from which to sample.
 
 $(TYPEDFIELDS)
 
 Both `f` and `grad` should be single-argument functions.
 
+!!! warning
+    Observe that `f` should be in its
+    log-concave form and that no checks are performed in order to verify this.
 """
 struct Objective{F<:Function,G<:Function}
     "The (log-concave) function defining the density `f(x) -> y`"
@@ -91,7 +95,7 @@ desired, it should be specified.
     Observe that `f` should be in its
     log-concave form and that no checks are performed in order to verify this.
 """
-function Objective(f::Function, adbackend=AutoMooncake(; config=nothing), init=one(Float64)) where {T<:AbstractFloat}
+function Objective(f::Function, adbackend=AutoMooncake(; config=nothing), init=one(Float64))
     let f = f, backend = adbackend
         gradprep = prepare_gradient(f, backend, init)
         Objective(
@@ -159,12 +163,8 @@ function calc_slopes_and_intercepts(obj::Objective, abscissae::AbstractVector{T}
     return slopes, intercepts
 end
 
-function calc_domain_integral_exp(slopes::Vector{T}, intercepts::Vector{T},
-    intersects::Vector{T}, domain::Tuple{T,T}) where {T}
+function calc_domain_integral_exp(slopes::Vector{T}, intercepts::Vector{T}, intersects::Vector{T}) where {T}
     res = zero(T)
-    # res += exp_integral_line(
-    #     slopes[begin], intercepts[begin], domain[begin], intersects[end])
-    # res += exp_integral_line(slopes[end], intercepts[end], intersects[end], domain[end])
     for i in 1:length(slopes)
         res += exp_integral_line(slopes[i], intercepts[i], intersects[i], intersects[i+1])
     end
@@ -352,7 +352,7 @@ function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
 
 
     # TODO: Only calculate the intersections and weights that actually change.
-    # Recalculate intersection points for segments, fiven the new segment
+    # Recalculate intersection points for segments, given the new segment
     push!(all_inters, all_inters[end]) # Extend intercepts by one
     calc_intersects!(@view(all_inters[begin+1:end-1]), all_slopes, all_intercepts)
 
@@ -436,6 +436,12 @@ function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::Sampler{T}, add_segm
     __sample!(rng, v, s, add_segments)
     return nothing
 end
+
+"""
+$TYPEDSIGNATURES
+
+Fill the vector `v` with samples from `s`. Adds segments to `s` whenever the objective function of `s` is evaluated in order to speed up future sampling. This can be disabled by setting `add_segments=false`. Returns `nothing`.
+"""
 sample!(v::AbstractVector{T}, s::Sampler{T}, add_segments::Bool=true) where {T} = sample!(default_rng(), v, s, add_segments)
 
 end

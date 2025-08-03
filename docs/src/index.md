@@ -11,4 +11,5 @@ Documentation for [ARS](https://github.com/Eliassj/ARS.jl).
 
 ```@autodocs
 Modules = [ARS]
+Private = false
 ```
