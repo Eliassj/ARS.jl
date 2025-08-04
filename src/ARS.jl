@@ -53,9 +53,6 @@ end
 Objective function including its gradient
 =#
 
-"""
-Struct representing an (unnormalized) log-concave density from which to sample.
-"""
 struct Objective{F<:Function,G<:Function}
     "The (log-concave) function defining the density `f(x) -> y`"
     f::F
@@ -80,7 +77,7 @@ end
 @doc """
 $(SIGNATURES)
 
-Create an [`Objective`](@ref) for a function automatically generating its gradient.
+Create an `Objective` for a function automatically generating its gradient.
 Gradients are calculated using `DifferentiationInterface.jl` using the backend of choice
 with `Mooncake.jl` being the default. In order to prepare the gradient an initial value is
 required. By default this is `one(Float64)`. If a gradient for a different type is
@@ -93,7 +90,7 @@ desired, it should be specified.
 
 # Example
 
-```
+```julia
 # Create a sampler using `Mooncake.jl` autodiff and Float32 as its eltype
 ARS.Objective(somefun, AutoMooncake(; config=nothing), one(Float32))
 # Create a sampler using `AutoDiff.jl` autodiff and the default Float64 as its eltype
@@ -308,11 +305,6 @@ function eval_hull(h::LowerHull, x)
     sl * x + int
 end
 
-"""
-Struct for holding an objective function to sample from, an upper and a lower hull for adaptive rejection sampling.
-
-See also: [`ARS.sample!`](@ref)
-"""
 struct ARSampler{T,F,G}
     objective::Objective{F,G}
     upper_hull::UpperHull{T}
