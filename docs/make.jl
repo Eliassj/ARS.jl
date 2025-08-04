@@ -27,7 +27,7 @@ makedocs(;
     warnonly=[:missing_docs],
 )
 
-# deploydocs(;
-#     repo="github.com/Eliassj/ARS.jl",
-#     devbranch="master",
-# )
+deploydocs(;
+    repo="github.com/Eliassj/ARS.jl",
+    devbranch="main",
+)

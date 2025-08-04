@@ -134,6 +134,7 @@ f_log(x) = log(f(x))
 obj = ARS.Objective(f_log)
 
 sam = ARS.ARSampler(obj, [0.2, 0.8], (0.0, 1.0))
+nothing # hide
 ```
 
 Lets visualize the samples as before.
@@ -144,6 +145,7 @@ samples = ARS.sample!(sam, 100000)
 
 fig, ax, p = hist(samples, bins=100, label = "Samples", normalization = :pdf)
 lines!(ax, 0..1, beta_proper, label = "Target", color = Cycled(2))
+axislegend(ax)
 fig # hide
 ```
 
