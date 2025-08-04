@@ -11,4 +11,7 @@ Pages=["api.md"]
 ```@autodocs
 Modules = [ARS]
 Private = false
+Order=[:constant, :type, :function, :macro]
 ```
+
+

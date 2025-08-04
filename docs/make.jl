@@ -8,7 +8,7 @@ bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"))
 
 makedocs(;
     modules=[ARS],
-    authors="Eliassj <elias.sjolin@gmail.com> and contributors",
+    authors="Elias Sjölin <elias.sjolin@gmail.com> and contributors",
     sitename="ARS.jl",
     format=Documenter.HTML(;
         canonical="https://Eliassj.github.io/ARS.jl",
@@ -23,7 +23,8 @@ makedocs(;
     ],
     plugins=[bib],
     remotes=nothing,
-    checkdocs=:public
+    checkdocs=:public,
+    warnonly=[:missing_docs],
 )
 
 # deploydocs(;

@@ -55,14 +55,6 @@ Objective function including its gradient
 
 """
 Struct representing an (unnormalized) log-concave density from which to sample.
-
-$(TYPEDFIELDS)
-
-Both `f` and `grad` should be single-argument functions.
-
-!!! warning
-    Observe that `f` should be in its
-    log-concave form and that no checks are performed in order to verify this.
 """
 struct Objective{F<:Function,G<:Function}
     "The (log-concave) function defining the density `f(x) -> y`"
@@ -98,6 +90,15 @@ desired, it should be specified.
 !!! warning
     Observe that `f` should be in its
     log-concave form and that no checks are performed in order to verify this.
+
+# Example
+
+```
+# Create a sampler using `Mooncake.jl` autodiff and Float32 as its eltype
+ARS.Objective(somefun, AutoMooncake(; config=nothing), one(Float32))
+# Create a sampler using `AutoDiff.jl` autodiff and the default Float64 as its eltype
+ARS.Objective(somefun, AutoForwardDiff())
+```
 """
 function Objective(f::Function, adbackend=AutoMooncake(; config=nothing), init=one(Float64))
     let f = f, backend = adbackend
