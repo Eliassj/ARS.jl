@@ -24,7 +24,11 @@ include("doctemplates.jl")
 @compat public Objective, ARSampler, sample!
 
 """
+$TYPEDEF
+
 Non-mutable weights used in the `sample` function in this package in order to avoid allocations.
+
+$TYPEDFIELDS
 """
 struct AllocFreeWeights{S<:Real,T<:Number,V<:AbstractVector{T}} <: AbstractWeights{S,T,V}
     values::V
@@ -305,8 +309,10 @@ end
 
 """
 Struct for holding an objective function to sample from, an upper and a lower hull for adaptive rejection sampling.
+
+See also: [`ARS.sample!`](@ref)
 """
-struct Sampler{T,F,G}
+struct ARSampler{T,F,G}
     objective::Objective{F,G}
     upper_hull::UpperHull{T}
     lower_hull::LowerHull{T}
@@ -328,11 +334,11 @@ function ARSampler(
     u = UpperHull(obj, initial_points, domain)
     l = LowerHull(u, obj)
 
-    return Sampler{T,F,G}(obj, u, l)
+    return ARSampler{T,F,G}(obj, u, l)
 end
 
 # Adds a segment with abscissa at `x` to `s`
-function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
+function add_segment!(s::ARSampler{T}, x::T) where {T<:AbstractFloat}
 
     # Calculate slope, intercept and index of new segment
     new_slope = s.objective.grad(x)
@@ -382,7 +388,7 @@ function add_segment!(s::Sampler{T}, x::T) where {T<:AbstractFloat}
 end
 
 # Draw samples from `s`, filling `out`
-function __sample!(rng::AbstractRNG, out::Vector{T}, s::Sampler{T}, add_segments::Bool) where {T<:AbstractFloat}
+function __sample!(rng::AbstractRNG, out::Vector{T}, s::ARSampler{T}, add_segments::Bool) where {T<:AbstractFloat}
     n = length(out)
     n_accepted = 0
     while n_accepted < n
@@ -407,41 +413,35 @@ function __sample!(rng::AbstractRNG, out::Vector{T}, s::Sampler{T}, add_segments
     end
     return nothing
 end
-__sample!(out::Vector{T}, s::Sampler{T}, add_segments::Bool) where {T} = __sample!(default_rng(), out, s, add_segments)
+__sample!(out::Vector{T}, s::ARSampler{T}, add_segments::Bool) where {T} = __sample!(default_rng(), out, s, add_segments)
 
 # Draw `n` samples, returning a newly allocated vector.
-function __sample!(rng::AbstractRNG, s::Sampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat}
+function __sample!(rng::AbstractRNG, s::ARSampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat}
     out = Vector{T}(undef, n)
     __sample!(rng, out, s, add_segments)
     return out
 end
-__sample!(s::Sampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat} = __sample!(default_rng(), s, n, add_segments)
+__sample!(s::ARSampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat} = __sample!(default_rng(), s, n, add_segments)
+
 
 """
-$TYPEDSIGNATURES
+    sample!([rng=default_rng()], s::ARSampler, n::Integer, add_segments::Bool=true)
+    sample!([rng=default_rng()], v::AbstractVector, s::ARSampler, add_segments::Bool=true)
 
-Draw `n` samples from `s`. Adds segments to `s` whenever the objective function of `s` is evaluated in order to speed up future sampling. This can be disabled by setting `add_segments=false`.
+Draw samples from `s`. If supplied, a vector `v` will be filled with samples. Otherwise the number of samples is specified with `n`.
 """
-function sample!(rng::AbstractRNG, s::Sampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat}
+function sample! end
+
+function sample!(rng::AbstractRNG, s::ARSampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat}
     __sample!(rng, s, n, add_segments)
 end
-sample!(s::Sampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat} = sample!(default_rng(), s, n, add_segments)
+sample!(s::ARSampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat} = sample!(default_rng(), s, n, add_segments)
 
-"""
-$TYPEDSIGNATURES
-
-Fill the vector `v` with samples from `s`. Adds segments to `s` whenever the objective function of `s` is evaluated in order to speed up future sampling. This can be disabled by setting `add_segments=false`. Returns `nothing`.
-"""
-function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::Sampler{T}, add_segments::Bool=true) where {T}
+function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true) where {T}
     __sample!(rng, v, s, add_segments)
     return nothing
 end
 
-"""
-$TYPEDSIGNATURES
-
-Fill the vector `v` with samples from `s`. Adds segments to `s` whenever the objective function of `s` is evaluated in order to speed up future sampling. This can be disabled by setting `add_segments=false`. Returns `nothing`.
-"""
-sample!(v::AbstractVector{T}, s::Sampler{T}, add_segments::Bool=true) where {T} = sample!(default_rng(), v, s, add_segments)
+sample!(v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true) where {T} = sample!(default_rng(), v, s, add_segments)
 
 end

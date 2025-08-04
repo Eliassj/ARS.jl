@@ -17,6 +17,7 @@ ARS allows you to sample from unnormalized [logarithmically concave](https://en.
 using ARS, CairoMakie, Distributions, Random
 set_theme!(theme_minimal())
 update_theme!(linewidth = 6)
+update_theme!(fonts = (; regular = "DejaVu Sans"))
 Random.seed!(1)
 CairoMakie.activate!(; type="svg") # hide
 ```
@@ -102,6 +103,7 @@ set_theme!(
         my_color_theme()
 )) # hide
 update_theme!(linewidth = 6) # hide
+update_theme!(fonts = (; regular = "DejaVu Sans")) # hide
 Random.seed!(1) # hide
 CairoMakie.activate!(; type="svg") # hide
 ```
@@ -141,11 +143,11 @@ Lets visualize the samples as before.
 samples = ARS.sample!(sam, 100000)
 
 fig, ax, p = hist(samples, bins=100, label = "Samples", normalization = :pdf)
-lines!(ax, 0..1, beta_proper, label = "Target")
-fig
+lines!(ax, 0..1, beta_proper, label = "Target", color = Cycled(2))
+fig # hide
 ```
 
-Of course, we can specify arbitrary bounds.
+Of course, we can specify arbitrary bounds. Let's define the same beta distribution as above but truncated at $[0.5, 1.0]$ and compare them with sampling from a truncated `Distributions.jl` distribution. (with plotting code hidden for brevity).
 
 ```@setup 2
 cols = Makie.wong_colors()
@@ -162,31 +164,31 @@ dist_bounded = truncated(Beta(alpha, beta), lower=0.5)
 
 samples_true = rand(dist_bounded, 100000)
 
-fig, ax, p = density(
-    samples_bounded, 
-    label = "ARS samples", 
-    color = :transparent, 
-    strokewidth = 6,
-    boundary = (0.0, 1.0)
-)
-density!(
-    ax,
-    samples_true, 
-    label = "Distributions.jl",
-    color = :transparent, 
-    strokewidth = 6,
-    linestyle = :dot,
-    boundary = (0.0, 1.0)
-)
-Legend(
-    fig[1,1],
-    [elem_ars, elem_dist],
-    ["ARS.jl", "Distributions.jl"],
-    tellheight = false,
-    tellwidth = false,
-    margin = (10, 10, 10, 10),
-    halign = :right,
-    valign = :top,
-)
-fig
+fig, ax, p = density( # hide
+    samples_bounded,  # hide
+    label = "ARS samples",  # hide
+    color = :transparent,  # hide
+    strokewidth = 6, # hide
+    boundary = (0.0, 1.0) # hide
+) # hide
+density!( # hide
+    ax, # hide
+    samples_true,  # hide
+    label = "Distributions.jl", # hide
+    color = :transparent,  # hide
+    strokewidth = 6, # hide
+    linestyle = :dot, # hide
+    boundary = (0.0, 1.0) # hide
+) # hide
+Legend( # hide
+    fig[1,1], # hide
+    [elem_ars, elem_dist], # hide
+    ["ARS.jl", "Distributions.jl"], # hide
+    tellheight = false, # hide
+    tellwidth = false, # hide
+    margin = (10, 10, 10, 10), # hide
+    halign = :right, # hide
+    valign = :top, # hide
+) # hide
+fig # hide
 ```
