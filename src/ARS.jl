@@ -11,10 +11,8 @@ import SpecialFunctions: loggamma
 import Base.Iterators: drop, take
 using StatsBase
 import Random: default_rng, AbstractRNG
-
 using DifferentiationInterface
 import Mooncake
-
 using Compat
 
 
@@ -22,6 +20,7 @@ using Compat
 include("doctemplates.jl")
 
 @compat public Objective, ARSampler, sample!
+
 
 """
 $TYPEDEF
@@ -331,6 +330,11 @@ function ARSampler(
 end
 
 # Adds a segment with abscissa at `x` to `s`
+"""
+$TYPEDSIGNATURES
+
+Modifies the hulls of `s`, adding a segment with at `x`.
+"""
 function add_segment!(s::ARSampler{T}, x::T) where {T<:AbstractFloat}
 
     # Calculate slope, intercept and index of new segment
@@ -380,8 +384,12 @@ function add_segment!(s::ARSampler{T}, x::T) where {T<:AbstractFloat}
     return nothing
 end
 
-# Draw samples from `s`, filling `out`
-function __sample!(rng::AbstractRNG, out::Vector{T}, s::ARSampler{T}, add_segments::Bool) where {T<:AbstractFloat}
+"""
+    __sample!(rng::AbstractRNG, out::Vector{T}, s::ARSampler{T}, add_segments::Bool) where {T<:AbstractFloat}
+
+All other `__sample!` methods call this one.
+"""
+function __sample!(rng::AbstractRNG, out::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool) where {T<:AbstractFloat}
     n = length(out)
     n_accepted = 0
     while n_accepted < n
@@ -391,12 +399,12 @@ function __sample!(rng::AbstractRNG, out::Vector{T}, s::ARSampler{T}, add_segmen
         w = rand(rng)
         # Squeeze test
         if w <= exp(lo - up)
-            out[n_accepted+1] = x
             n_accepted += 1
+            out[n_accepted] = x
         elseif w <= exp(s.objective.f(x) - up)
             # Accept sample i
-            out[n_accepted+1] = x
             n_accepted += 1
+            out[n_accepted] = x
             if add_segments
                 add_segment!(s, x)
             end
@@ -434,7 +442,6 @@ function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::ARSampler{T}, add_se
     __sample!(rng, v, s, add_segments)
     return nothing
 end
-
 sample!(v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true) where {T} = sample!(default_rng(), v, s, add_segments)
 
 end
