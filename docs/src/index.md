@@ -149,7 +149,7 @@ axislegend(ax)
 fig # hide
 ```
 
-Of course, we can specify arbitrary bounds. Let's define the same beta distribution as above but truncated at $[0.5, 1.0]$ and compare them with sampling from a truncated `Distributions.jl` distribution. (with plotting code hidden for brevity).
+Of course, we can specify arbitrary bounds. Let's define the same beta distribution as above but truncated at $[0.5, 1.0]$ and compare them with sampling from a truncated `Distributions.jl` distribution (with plotting code hidden for brevity).
 
 ```@setup 2
 cols = Makie.wong_colors()
