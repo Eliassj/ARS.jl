@@ -21,6 +21,7 @@ include("doctemplates.jl")
 
 @compat public Objective, ARSampler, sample!
 
+const DEFAULT_MAX_SEGMENTS::Int = 25
 
 """
 $TYPEDEF
@@ -329,6 +330,10 @@ function ARSampler(
     return ARSampler{T,F,G}(obj, u, l)
 end
 
+function n_segments(s::ARSampler)
+    n_lines(s.upper_hull)
+end
+
 # Adds a segment with abscissa at `x` to `s`
 """
 $TYPEDSIGNATURES
@@ -389,7 +394,7 @@ end
 
 All other `__sample!` methods call this one.
 """
-function __sample!(rng::AbstractRNG, out::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool) where {T<:AbstractFloat}
+function __sample!(rng::AbstractRNG, out::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool, max_segments) where {T<:AbstractFloat}
     n = length(out)
     n_accepted = 0
     while n_accepted < n
@@ -405,24 +410,24 @@ function __sample!(rng::AbstractRNG, out::AbstractVector{T}, s::ARSampler{T}, ad
             # Accept sample i
             n_accepted += 1
             out[n_accepted] = x
-            if add_segments
+            if add_segments && n_segments(s) < max_segments
                 add_segment!(s, x)
             end
-        elseif add_segments
+        elseif add_segments && n_segments(s) < max_segments
             add_segment!(s, x)
         end
     end
     return nothing
 end
-__sample!(out::Vector{T}, s::ARSampler{T}, add_segments::Bool) where {T} = __sample!(default_rng(), out, s, add_segments)
+__sample!(out::Vector{T}, s::ARSampler{T}, add_segments::Bool, max_segments) where {T} = __sample!(default_rng(), out, s, add_segments, max_segments)
 
 # Draw `n` samples, returning a newly allocated vector.
-function __sample!(rng::AbstractRNG, s::ARSampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat}
+function __sample!(rng::AbstractRNG, s::ARSampler{T}, n::Integer, add_segments::Bool, max_segments) where {T<:AbstractFloat}
     out = Vector{T}(undef, n)
-    __sample!(rng, out, s, add_segments)
+    __sample!(rng, out, s, add_segments, max_segments)
     return out
 end
-__sample!(s::ARSampler{T}, n::Integer, add_segments::Bool) where {T<:AbstractFloat} = __sample!(default_rng(), s, n, add_segments)
+__sample!(s::ARSampler{T}, n::Integer, add_segments::Bool, max_segments) where {T<:AbstractFloat} = __sample!(default_rng(), s, n, add_segments, max_segments)
 
 
 """
@@ -433,15 +438,15 @@ Draw samples from `s`. If supplied, a vector `v` will be filled with samples. Ot
 """
 function sample! end
 
-function sample!(rng::AbstractRNG, s::ARSampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat}
-    __sample!(rng, s, n, add_segments)
+function sample!(rng::AbstractRNG, s::ARSampler{T}, n::Integer, add_segments::Bool=true, max_segments=DEFAULT_MAX_SEGMENTS) where {T<:AbstractFloat}
+    __sample!(rng, s, n, add_segments, max_segments)
 end
-sample!(s::ARSampler{T}, n::Integer, add_segments::Bool=true) where {T<:AbstractFloat} = sample!(default_rng(), s, n, add_segments)
+sample!(s::ARSampler{T}, n::Integer, add_segments::Bool=true, max_segments=DEFAULT_MAX_SEGMENTS) where {T<:AbstractFloat} = sample!(default_rng(), s, n, add_segments, max_segments)
 
-function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true) where {T}
-    __sample!(rng, v, s, add_segments)
+function sample!(rng::AbstractRNG, v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true, max_segments=DEFAULT_MAX_SEGMENTS) where {T}
+    __sample!(rng, v, s, add_segments, max_segments)
     return nothing
 end
-sample!(v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true) where {T} = sample!(default_rng(), v, s, add_segments)
+sample!(v::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool=true, max_segments=DEFAULT_MAX_SEGMENTS) where {T} = sample!(default_rng(), v, s, add_segments, max_segments)
 
 end
