@@ -12,10 +12,8 @@ import Base.Iterators: drop, take
 using StatsBase
 import Random: default_rng, AbstractRNG
 using DifferentiationInterface
-import Mooncake
+import ForwardDiff
 using Compat
-
-
 
 include("doctemplates.jl")
 
@@ -74,14 +72,14 @@ struct Objective{F<:Function,G<:Function}
     end
 end
 
-@doc """
+"""
 $(SIGNATURES)
 
 Create an `Objective` for a function automatically generating its gradient.
 Gradients are calculated using `DifferentiationInterface.jl` using the backend of choice
-with `Mooncake.jl` being the default. In order to prepare the gradient an initial value is
+with `ForwardDiff.jl` being the default. In order to prepare the gradient an initial value is
 required. By default this is `one(Float64)`. If a gradient for a different type is
-desired, it should be specified. 
+desired, it should be specified through this initial value. 
 
 
 !!! warning
@@ -91,13 +89,13 @@ desired, it should be specified.
 # Example
 
 ```julia
-# Create a sampler using `Mooncake.jl` autodiff and Float32 as its eltype
+# Create an objective using `Mooncake.jl` autodiff and Float32 as its eltype
 ARS.Objective(somefun, AutoMooncake(; config=nothing), one(Float32))
-# Create a sampler using `AutoDiff.jl` autodiff and the default Float64 as its eltype
-ARS.Objective(somefun, AutoForwardDiff())
+# Create an objective using `AutoDiff.jl` autodiff and the default Float64 as its eltype
+ARS.Objective(somefun)
 ```
 """
-function Objective(f::Function, adbackend=AutoMooncake(; config=nothing), init=one(Float64))
+function Objective(f::Function, adbackend=AutoForwardDiff(), init=one(Float64))
     let f = f, backend = adbackend
         gradprep = prepare_gradient(f, backend, init)
         Objective(
@@ -390,7 +388,8 @@ function add_segment!(s::ARSampler{T}, x::T) where {T<:AbstractFloat}
 end
 
 """
-    __sample!(rng::AbstractRNG, out::Vector{T}, s::ARSampler{T}, add_segments::Bool) where {T<:AbstractFloat}
+    __sample!(rng::AbstractRNG, out::AbstractVector{T}, s::ARSampler{T}, add_segments::Bool, max_segments) where {T<:AbstractFloat}
+ 
 
 All other `__sample!` methods call this one.
 """

@@ -3,7 +3,7 @@
 
 ## Comparison with `AdaptiveRejectionSampling.jl`
 
-```@example 1
+```@example bench1
 using ARS, AdaptiveRejectionSampling
 using DifferentiationInterface, Distributions
 using ForwardDiff
@@ -15,17 +15,17 @@ f(x) = logpdf(Laplace(0., 0.5), x) + logpdf(Normal(0.0, 2.0), x)
 
 ### ARS.jl
 
-```@example 1
+```@example bench1
 
 #= ARS.jl =#
 sam_ARS = ARS.ARSampler(ARS.Objective(f, AutoForwardDiff()), [-0.5, 0.5], (-Inf, Inf))
 
-@be deepcopy(sam_ARS) ARS.sample!(_, 100000, true, 25) samples=100 evals=1
+@be deepcopy(sam_ARS) ARS.sample!(_, 100000, true, 25) samples=100 evals=1 seconds=1000
 ```
 
 ### AdaptiveRejectionSampling.jl
 
-```@example 1
+```@example bench1
 
 #= AdaptiveRejectionSampling.jl =#
 

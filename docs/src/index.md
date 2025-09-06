@@ -41,7 +41,7 @@ axislegend(ax)
 fig # hide
 ```
 
-Let's imagine we did not know the actual normalizing constant for the normal distribution above. In order to sample from it using ARS, we first define an objective function using [ARS.Objective](@ref). By default, automatic differentiation through [Mooncake.jl](https://github.com/chalk-lab/Mooncake.jl) is used to calculate the derivative of the function to be sampled from.
+Let's imagine we did not know the actual normalizing constant for the normal distribution above. In order to sample from it using ARS, we first define an objective function using [`ARS.Objective`](@ref). By default, automatic differentiation through [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) is used to calculate the derivative of the function to be sampled from.
 
 First, we need to supply the function in its log form. For illustration purposes, we simply do `log(f(x))`.
 
